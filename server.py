@@ -1,6 +1,8 @@
 import os
 import sys
 import math
+import json
+import hashlib
 from pathlib import Path
 from typing import Optional, Union, Dict, Any, List
 
@@ -52,47 +54,41 @@ state_db = {
     "frames": []
 }
 
+# Single-entry cache for GET /api/analysis
+_analysis_cache = {"key": None, "result": None}
+
 def get_or_create_default_profile() -> Profile:
     p = load_profile(state_db["profile_name"])
-    
-    # Check and self-heal default tools to match PLAN.md
-    t1 = p.get_tool("T01")
-    t2 = p.get_tool("T02")
-    t3 = p.get_tool("T03")
-    dirty = False
-    
-    if not t1:
-        p.tools.append(Tool(
-            id="T01", name="OD Rough 90°", type="turning_OD",
-            mount_x=120.0, mount_z=30.0, orientation_deg=90.0,
-            holder=Holder(block_width=24.0, block_length=60.0, shank_length=30.0, shank_diameter=12.0, tip_v_offset=0.0)
-        ))
-        dirty = True
-    if not t2:
-        p.tools.append(Tool(
-            id="T02", name="Boring 0°", type="boring",
-            mount_x=40.0, mount_z=-50.0, orientation_deg=0.0,
-            holder=Holder(block_width=24.0, block_length=60.0, shank_length=40.0, shank_diameter=10.0, tip_v_offset=0.0)
-        ))
-        dirty = True
-    if not t3:
-        p.tools.append(Tool(
-            id="T03", name="Cutoff 90°", type="parting",
-            mount_x=80.0, mount_z=20.0, orientation_deg=90.0,
-            holder=Holder(block_width=24.0, block_length=50.0, shank_length=20.0, shank_diameter=12.0, tip_v_offset=0.0)
-        ))
-        dirty = True
-        
-    # Remove any default unnamed tool
-    original_len = len(p.tools)
-    p.tools = [t for t in p.tools if t.id in ("T01", "T02", "T03")]
-    if len(p.tools) != original_len:
-        dirty = True
-        
-    if dirty:
+
+    # First run only (empty profile): seed the PLAN.md default tool set.
+    # Never touch tools on an existing profile — G-code loads auto-add tools
+    # and the user tunes mounts/reference in Settings.
+    if not p.tools:
+        p.tools = [
+            Tool(
+                id="T01", name="OD Rough 90°", type="turning_OD",
+                mount_x=120.0, mount_z=30.0, orientation_deg=90.0,
+                holder=Holder(block_width=24.0, block_length=60.0, shank_length=30.0, shank_diameter=12.0, tip_v_offset=0.0)
+            ),
+            Tool(
+                id="T02", name="Boring 0°", type="boring",
+                mount_x=40.0, mount_z=-50.0, orientation_deg=0.0,
+                holder=Holder(block_width=24.0, block_length=60.0, shank_length=40.0, shank_diameter=10.0, tip_v_offset=0.0)
+            ),
+            Tool(
+                id="T03", name="Cutoff 90°", type="parting",
+                mount_x=80.0, mount_z=20.0, orientation_deg=90.0,
+                holder=Holder(block_width=24.0, block_length=50.0, shank_length=20.0, shank_diameter=12.0, tip_v_offset=0.0)
+            ),
+        ]
         p.reference_tool_id = "T01"
         save_profile(p)
-        
+
+    # Keep the reference pointing at a tool that still exists.
+    if not p.get_tool(p.reference_tool_id):
+        p.reference_tool_id = p.tools[0].id
+        save_profile(p)
+
     return p
 
 # Load G-code helper
@@ -196,17 +192,33 @@ def post_gcode(req: GcodeRequest):
 @app.get("/api/analysis")
 def get_analysis():
     p = get_or_create_default_profile()
+    
+    # Compute cache key
+    p_dict = p.model_dump()
+    p_json = json.dumps(p_dict, sort_keys=True)
+    gcode = state_db.get("gcode_text", "")
+    candidate_id = state_db.get("candidate_tool_id", "")
+    
+    raw_key = f"{p_json}||{gcode}||{candidate_id}"
+    cache_key = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+    
+    if _analysis_cache["key"] == cache_key:
+        return _analysis_cache["result"]
+        
     blocks = state_db["blocks"]
     frames = state_db["frames"]
     
     if not blocks:
-        return {
+        res = {
             "timeline": [],
             "envelopes": {},
             "carve_keyframes": [],
             "green_zone": None,
             "collisions": []
         }
+        _analysis_cache["key"] = cache_key
+        _analysis_cache["result"] = res
+        return res
         
     # 1. Timeline
     timeline = []
@@ -286,7 +298,7 @@ def get_analysis():
         try:
             grid, xs, zs = compute_green_zone_grid(
                 p, envs_np, cand, cutting_envelopes=cut_envs,
-                grid_x=grid_x, grid_z=grid_z, sample_stride=2,
+                grid_x=grid_x, grid_z=grid_z, sample_stride=1,
                 consider_table=p.green_zone_consider_table,
                 check_tool_overlap=True
             )
@@ -322,7 +334,7 @@ def get_analysis():
     for tool in p.tools:
         try:
             # 1. Check against fixtures (chuck/jaws) - all envelopes
-            has_col_fix, hits_fix = check_collision_for_tool(tool, (0, 0), envs_np, fixtures, p, sample_stride=2)
+            has_col_fix, hits_fix = check_collision_for_tool(tool, (0, 0), envs_np, fixtures, p, sample_stride=1)
             if has_col_fix:
                 for active_tid, local_idx in hits_fix:
                     timeline_idx = indices_by_tid[active_tid][local_idx]
@@ -335,7 +347,7 @@ def get_analysis():
                 # 2. Check against carved workpiece - only other tools
                 other_envs = {tid: e for tid, e in envs_np.items() if tid != tool.id}
                 if other_envs:
-                    has_col_wp, hits_wp = check_collision_for_tool(tool, (0, 0), other_envs, carved, p, sample_stride=2)
+                    has_col_wp, hits_wp = check_collision_for_tool(tool, (0, 0), other_envs, carved, p, sample_stride=1)
                     if has_col_wp:
                         for active_tid, local_idx in hits_wp:
                             timeline_idx = indices_by_tid[active_tid][local_idx]
@@ -347,13 +359,16 @@ def get_analysis():
         except Exception as e:
             print(f"Error checking collision for tool {tool.id}: {e}")
             
-    return {
+    res = {
         "timeline": timeline,
         "envelopes": envelopes_json,
         "carve_keyframes": carve_keyframes,
         "green_zone": green_zone_data,
         "collisions": collisions
     }
+    _analysis_cache["key"] = cache_key
+    _analysis_cache["result"] = res
+    return res
 
 @app.patch("/api/profile")
 def patch_profile(update: dict):

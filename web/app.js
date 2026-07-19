@@ -541,8 +541,10 @@ function buildGreenZone(gz) {
                 const cand = apiState.tools.find(t => t.id === apiState.candidate_tool_id);
                 if (!cand) continue;
 
-                const cellMountX = cand.mount_x + (x0 + ix * dx + dx / 2);
-                const cellMountZ = cand.mount_z + (z0 + iz * dz + dz / 2);
+                // x0/z0 are sample-point deltas; each box is centered on its
+                // sample (same convention as the 2D app's half-cell shift).
+                const cellMountX = cand.mount_x + (x0 + ix * dx);
+                const cellMountZ = cand.mount_z + (z0 + iz * dz);
 
                 const wx = ox + cellMountX;
                 const wz = oz + cellMountZ;
