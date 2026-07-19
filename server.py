@@ -401,6 +401,11 @@ def patch_profile(update: dict):
         if "candidate_tool_id" in update and update["candidate_tool_id"]:
             state_db["candidate_tool_id"] = update["candidate_tool_id"]
             
+        # Update machine
+        if "machine" in update and update["machine"]:
+            from ck40b_sim.models import Machine
+            p.machine = Machine.model_validate(update["machine"])
+            
         p.snap_all_slotted()
         save_profile(p)
         

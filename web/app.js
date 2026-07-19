@@ -455,6 +455,17 @@ function buildTools(toolsList) {
     tableMesh.position.set(tblCenterZ, TABLE_TOP_Y - TABLE_THICKNESS / 2, tblCenterX);
     slideTableGroup.add(tableMesh);
 
+    // Draw slots if enabled
+    if (s.show_slots) {
+        const slotMat = new THREE.MeshStandardMaterial({ color: 0x14181f, roughness: 0.9 });
+        [s.slot_z1, s.slot_z2].forEach(sz => {
+            const slotGeo = new THREE.BoxGeometry(s.slot_width, 0.8, s.x_max - s.x_min);
+            const slotMesh = new THREE.Mesh(slotGeo, slotMat);
+            slotMesh.position.set(oz + sz, TABLE_TOP_Y + 0.45, ox + (s.x_min + s.x_max) / 2);
+            slideTableGroup.add(slotMesh);
+        });
+    }
+
     // 2. Build Each Tool in the setup
     toolsList.forEach(tool => {
         const toolGroup = new THREE.Group();
@@ -881,6 +892,13 @@ function populateSettingsForm() {
     document.getElementById('cfg-wp-len').value = apiState.workpiece.raw_length;
     document.getElementById('cfg-wp-grip').value = apiState.workpiece.grip_length_in_chuck;
     
+    // Slide Table / T-Slots
+    const st = apiState.machine.slide_table;
+    document.getElementById('cfg-show-slots').checked = !!st.show_slots;
+    document.getElementById('cfg-slot-z1').value = st.slot_z1 ?? 0;
+    document.getElementById('cfg-slot-z2').value = st.slot_z2 ?? 0;
+    document.getElementById('cfg-slot-width').value = st.slot_width ?? 0;
+    
     // Dropdowns
     const refSelect = document.getElementById('cfg-ref-tool');
     const candSelect = document.getElementById('cfg-cand-tool');
@@ -982,7 +1000,12 @@ document.getElementById('cfg-save-btn').addEventListener('click', async () => {
     const wp_len = parseFloat(document.getElementById('cfg-wp-len').value);
     const wp_grip = parseFloat(document.getElementById('cfg-wp-grip').value);
     
-    if ([chuck_dia, chuck_len, jaw_prot, jaw_dia, wp_dia, wp_len, wp_grip].some(isNaN)) {
+    const show_slots = document.getElementById('cfg-show-slots').checked;
+    const slot_z1 = parseFloat(document.getElementById('cfg-slot-z1').value);
+    const slot_z2 = parseFloat(document.getElementById('cfg-slot-z2').value);
+    const slot_width = parseFloat(document.getElementById('cfg-slot-width').value);
+    
+    if ([chuck_dia, chuck_len, jaw_prot, jaw_dia, wp_dia, wp_len, wp_grip, slot_z1, slot_z2, slot_width].some(isNaN)) {
         alert('กรุณากรอกค่าตัวเลขให้ถูกต้อง');
         return;
     }
@@ -1018,7 +1041,17 @@ document.getElementById('cfg-save-btn').addEventListener('click', async () => {
         },
         tools,
         reference_tool_id: ref_tool_id,
-        candidate_tool_id: cand_tool_id
+        candidate_tool_id: cand_tool_id,
+        machine: {
+            ...apiState.machine,
+            slide_table: {
+                ...apiState.machine.slide_table,
+                show_slots: show_slots,
+                slot_z1: slot_z1,
+                slot_z2: slot_z2,
+                slot_width: slot_width
+            }
+        }
     };
     
     try {
