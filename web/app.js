@@ -98,8 +98,8 @@ function init() {
     dirLight1.shadow.bias = -0.0005;
     scene.add(dirLight1);
 
-    const dirLight2 = new THREE.DirectionalLight('#00ccff', 0.9);
-    dirLight2.position.set(-150, -100, -100);
+    const dirLight2 = new THREE.DirectionalLight('#8ab4ff', 1.2);
+    dirLight2.position.set(-120, 140, 320); // front-left fill so the chuck face reads
     scene.add(dirLight2);
 
     const pointLight = new THREE.PointLight('#ffaa66', 1.2, 200);
@@ -109,9 +109,9 @@ function init() {
     // 6. Define PBR Materials
     materials = {
         chuckBody: new THREE.MeshStandardMaterial({
-            color: '#3a4454',
-            metalness: 0.85,
-            roughness: 0.25,
+            color: '#46536a',
+            metalness: 0.7,
+            roughness: 0.35,
             clearcoat: 0.1
         }),
         jaws: new THREE.MeshStandardMaterial({
@@ -140,6 +140,13 @@ function init() {
             color: '#282e38',
             metalness: 0.5,
             roughness: 0.4
+        }),
+        toolHolderActive: new THREE.MeshStandardMaterial({
+            color: '#00b8d4',
+            emissive: '#00b8d4',
+            emissiveIntensity: 0.35,
+            metalness: 0.5,
+            roughness: 0.35
         }),
         toolHolderColliding: new THREE.MeshStandardMaterial({
             color: '#ff1744',
@@ -178,7 +185,7 @@ function init() {
     const markerGeo = new THREE.TorusGeometry(35, 1.5, 8, 32);
     const markerMat = new THREE.MeshBasicMaterial({ color: '#ff3366', side: THREE.DoubleSide });
     collisionMarker = new THREE.Mesh(markerGeo, markerMat);
-    collisionMarker.rotation.y = Math.PI / 2; // Revolves around X axis (spindle)
+    collisionMarker.rotation.x = Math.PI / 2; // Flat target ring in the horizontal working plane
     collisionMarker.visible = false;
     scene.add(collisionMarker);
 
@@ -191,25 +198,36 @@ function init() {
     animate();
 }
 
-// Coordinate mapping: machine (xr, z) -> world (x_w = z, y_w = -xr, z_w = 0)
+// Coordinate mapping: the machine (x_r, z) plane is the HORIZONTAL working
+// plane of a flat-bed gang lathe — spindle centerline and tool tips share one
+// horizontal plane at y = 0. world x = machine z (spindle axis), world z =
+// machine x_r (+X toward the operator/viewer), world y = up (visual only).
 function mapCoords(xr, z) {
-    return new THREE.Vector3(z, -xr, 0);
+    return new THREE.Vector3(z, 0, xr);
 }
+
+// Visual height constants (machine plane sits at y = 0)
+const TABLE_THICKNESS = 12;
+const TABLE_TOP_Y = -26;   // slide table surface, below the tool-tip plane
+const BLOCK_H = 30;        // tool holder block height standing on the table
 
 // Set Camera presets
 function setCameraPreset(preset) {
+    camera.up.set(0, 1, 0);
+    const target = new THREE.Vector3(20, -30, 130);
     if (preset === 'iso') {
-        camera.position.set(-150, 180, 260);
-        camera.lookAt(0, -50, 0);
+        camera.position.set(400, 330, 470);
     } else if (preset === 'front') {
-        camera.position.set(0, -60, 320);
-        camera.lookAt(0, -60, 0);
+        // Operator's view: standing at +Z looking at the machine
+        camera.position.set(10, 60, 450);
     } else if (preset === 'top') {
-        camera.position.set(0, 300, 0);
-        camera.lookAt(0, -50, 0);
+        // Straight down — matches the 2D app plot (machine +Z right, +X down)
+        camera.up.set(0, 0, -1);
+        camera.position.set(10, 480, 100.01);
     }
+    camera.lookAt(target);
     if (controls) {
-        controls.target.set(0, -50, 0);
+        controls.target.copy(target);
     }
 }
 
@@ -409,17 +427,16 @@ function buildTools(toolsList) {
 
     const tableLengthZ = s.z_max - s.z_min;
     const tableWidthX = s.x_max - s.x_min;
-    const tableThickness = 12;
 
-    const tableGeo = new THREE.BoxGeometry(tableLengthZ, tableThickness, tableWidthX);
+    const tableGeo = new THREE.BoxGeometry(tableLengthZ, TABLE_THICKNESS, tableWidthX);
     const tableMesh = new THREE.Mesh(tableGeo, materials.table);
     tableMesh.receiveShadow = true;
 
-    // Center table centered on the extent
+    // Horizontal plate: machine Z extent -> world x, machine X extent -> world z,
+    // surface TABLE_TOP_Y below the tool-tip plane
     const tblCenterZ = oz + (s.z_min + s.z_max) / 2;
     const tblCenterX = ox + (s.x_min + s.x_max) / 2;
-    // Offset Y below workpiece plane (so tools sit on it at Z=0)
-    tableMesh.position.set(tblCenterZ, -tblCenterX, -tableThickness / 2 - 5);
+    tableMesh.position.set(tblCenterZ, TABLE_TOP_Y - TABLE_THICKNESS / 2, tblCenterX);
     slideTableGroup.add(tableMesh);
 
     // 2. Build Each Tool in the setup
@@ -433,39 +450,44 @@ function buildTools(toolsList) {
         const bx = ox + tool.mount_x;
         const bz = oz + tool.mount_z;
 
-        // Position group at the block home position
-        toolGroup.position.set(bz, -bx, 0);
+        // Group origin = tool tip, in the horizontal working plane (y = 0)
+        toolGroup.position.set(bz, 0, bx);
 
-        // Rotation around Z axis (Z centerline -> world X, orientation_deg=90 aligns with -Y)
+        // orientation_deg: CCW from machine +Z toward +X in the (Z, X) plane.
+        // machine Z -> world x, machine X -> world z, so rotate about world -y.
         const angle = tool.orientation_deg * Math.PI / 180;
-        toolGroup.rotation.z = -angle;
+        toolGroup.rotation.y = -angle;
 
-        // Draw Holder Block
+        // Draw Holder Block — stands on the table, clamp rises past the shank
         const h = tool.holder;
         const holderBlock = new THREE.Mesh(
-            new THREE.BoxGeometry(h.block_length, h.block_width, 18),
+            new THREE.BoxGeometry(h.block_length, BLOCK_H, h.block_width),
             materials.toolHolder
         );
         holderBlock.name = 'holder';
-        // Local coordinates: u axis is block_length, v axis is block_width
-        // Block centers at u = shank_length + block_length/2, v = tip_v_offset
-        holderBlock.position.set(h.shank_length + h.block_length / 2, h.tip_v_offset, 0);
+        // Local axes: x = shank axis (u), z = in-plane width (v), y = height.
+        // Block sits on the table top, so its center is half a height above it.
+        holderBlock.position.set(
+            h.shank_length + h.block_length / 2,
+            TABLE_TOP_Y + BLOCK_H / 2,
+            h.tip_v_offset
+        );
         holderBlock.castShadow = true;
         toolGroup.add(holderBlock);
 
-        // Draw Shank
+        // Draw Shank — horizontal, centered on the tool-tip plane (y = 0)
         const shank = new THREE.Mesh(
-            new THREE.BoxGeometry(h.shank_length, h.shank_diameter, 10),
+            new THREE.BoxGeometry(h.shank_length, h.shank_diameter, h.shank_diameter),
             materials.toolShank
         );
-        shank.position.set(h.shank_length / 2, h.tip_v_offset, 0);
+        shank.position.set(h.shank_length / 2, 0, h.tip_v_offset);
         shank.castShadow = true;
         toolGroup.add(shank);
 
         // Draw Carbide Insert Tip (pointing along -u direction)
         const tipGeo = new THREE.ConeGeometry(5, 8, 4);
         const tipMesh = new THREE.Mesh(tipGeo, materials.insertTip);
-        tipMesh.rotation.z = -Math.PI / 2; // points left (-u)
+        tipMesh.rotation.z = Math.PI / 2; // cone apex toward -local x (the tip)
         tipMesh.position.set(0, 0, 0);
         toolGroup.add(tipMesh);
 
@@ -486,8 +508,8 @@ function buildGreenZone(gz) {
     const ox = apiState.machine.slide_origin_x;
     const oz = apiState.machine.slide_origin_z;
 
-    // Green zone depth (thickness)
-    const thickness = 10;
+    // Green zone: thin translucent slab lying flat ON the slide table surface
+    const thickness = 6;
 
     // Single cell box geometry (reuse for batching)
     const cellGeo = new THREE.BoxGeometry(dz, thickness, dx);
@@ -497,7 +519,7 @@ function buildGreenZone(gz) {
             const val = mask[iz * nx + ix];
             if (val === 1) { // 1 = Green/Safe
                 const cellMesh = new THREE.Mesh(cellGeo, materials.greenZone);
-                
+
                 // Calculate position relative to candidate tool mount home
                 // grid coordinates map to slide table frame offsets
                 const cand = apiState.tools.find(t => t.id === apiState.candidate_tool_id);
@@ -509,15 +531,16 @@ function buildGreenZone(gz) {
                 const wx = ox + cellMountX;
                 const wz = oz + cellMountZ;
 
-                cellMesh.position.set(wz, -wx, -thickness / 2 - 2);
+                cellMesh.position.set(wz, TABLE_TOP_Y + thickness / 2 + 0.5, wx);
                 greenZoneMeshGroup.add(cellMesh);
             }
         }
     }
 
-    // Initially hide
+    // Initially hide. Add to the slide-table group: mount positions live in the
+    // slide frame, so the zone must ride along when the table moves.
     greenZoneMeshGroup.visible = false;
-    scene.add(greenZoneMeshGroup);
+    slideTableGroup.add(greenZoneMeshGroup);
 }
 
 // ── Playback Logic ────────────────────────────────────────────────────────
@@ -578,9 +601,8 @@ function updatePlaybackUI() {
     activeToolLabel.innerText = tLabel ? `${frame.tool_id} (${tLabel.name})` : frame.tool_id;
     activeToolLabel.style.color = frame.rapid ? '#ffffff' : 'var(--accent-green)';
 
-    // Find original motion block for N line number
-    const block = apiState.gcode_name ? apiAnalysis.timeline[timelineIndex] : null;
-    gcodeLine.innerText = `N${timelineIndex * 2}`;
+    // Real source line number from the parser (SimFrame.line_no via the API)
+    gcodeLine.innerText = (frame.n != null) ? `N${frame.n}` : '—';
 
     // 4. Update workpiece shape (carving)
     updateWorkpieceCarving(timelineIndex);
@@ -598,8 +620,8 @@ function updatePlaybackUI() {
         const tx = frame.x_r - homeTipX;
         const tz = frame.z - homeTipZ;
 
-        // Apply translation to table group
-        slideTableGroup.position.set(tz, -tx, 0);
+        // Apply translation to table group — motion stays in the horizontal plane
+        slideTableGroup.position.set(tz, 0, tx);
     }
 
     // 6. Highlight active tool holder visually
@@ -609,8 +631,8 @@ function updatePlaybackUI() {
             const holder = toolMeshGroup.getObjectByName('holder');
             if (holder) {
                 if (tool.id === frame.tool_id) {
-                    // Set brighter material to indicate active
-                    holder.material = materials.toolHolderColliding;
+                    // Cyan = active tool; red stays reserved for collisions
+                    holder.material = materials.toolHolderActive;
                 } else {
                     holder.material = materials.toolHolder;
                 }
@@ -622,7 +644,7 @@ function updatePlaybackUI() {
     const colEvent = apiAnalysis.collisions.find(c => c.i === timelineIndex);
     if (colEvent) {
         // Show red torus ring at collision point
-        collisionMarker.position.set(frame.z, -frame.x_r, 0);
+        collisionMarker.position.set(frame.z, 0, frame.x_r);
         collisionMarker.visible = true;
 
         // Flash offending tool holder red

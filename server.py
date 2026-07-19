@@ -216,7 +216,8 @@ def get_analysis():
             "tool_id": f.active_tool_id,
             "x_r": float(f.tip_x),
             "z": float(f.tip_z),
-            "rapid": f.move_type == "rapid"
+            "rapid": f.move_type == "rapid",
+            "n": int(f.line_no)
         })
         
     # 2. Envelopes
