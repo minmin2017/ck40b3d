@@ -4,3 +4,5 @@ shapely>=2.0
 pydantic>=2.5
 numpy>=1.26
 mcp>=1.0
+fastapi>=0.100.0
+uvicorn>=0.22.0

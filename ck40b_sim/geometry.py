@@ -763,3 +763,55 @@ def compute_workpiece_limits(
         "min_length": min_l,
         "current_ok": current_ok,
     }
+
+
+# ---------------------------------------------------------------------------
+# Web-renderer helper (added for CK40B-3D). Pure function, no Qt/UI deps.
+# ---------------------------------------------------------------------------
+
+def carved_radius_profile(
+    profile: Profile,
+    cutting_envelopes: dict[str, np.ndarray] | None,
+    z_step: float = 0.5,
+    margin: float = 0.0,
+) -> list[tuple[float, float]]:
+    """Outer-radius silhouette of the (possibly carved) workpiece as an OPEN
+    polyline ``[(x_r, z), ...]`` ordered from the CHUCK side (z_back) to the
+    FACE (z_front), with ``x_r >= 0``. Suitable to feed straight into
+    ``THREE.LatheGeometry`` (revolve around the Z axis).
+
+    This is the half-profile counterpart of ``carved_workpiece_polygon`` — it
+    reuses the exact same min-radius-per-Z-bin carve model (including the
+    3-bin window bridge and ``drop_cutoff_front``) so the revolved 3D mesh
+    matches the 2D collision geometry. ``margin`` defaults to 0 because the
+    visual workpiece should be its true size, not the safety-padded one.
+    """
+    wp = profile.workpiece
+    raw_r = wp.raw_diameter / 2.0
+    z_back = wp.z_face_position - wp.raw_length
+    z_front = wp.z_face_position
+    z_bins = np.arange(z_back, z_front + z_step, z_step)
+    n_bins = len(z_bins)
+    remaining = np.full(n_bins, raw_r)
+
+    if cutting_envelopes:
+        pts_list = [env for env in cutting_envelopes.values() if env.size > 0]
+        if pts_list:
+            all_pts = np.concatenate(pts_list, axis=0)
+            z_idx = np.clip(
+                ((all_pts[:, 1] - z_back) / z_step).astype(int), 0, n_bins - 1
+            )
+            for i, x in zip(z_idx, all_pts[:, 0]):
+                for offset in (-1, 0, 1):
+                    idx = i + offset
+                    if 0 <= idx < n_bins and x < remaining[idx]:
+                        remaining[idx] = max(0.0, x)
+            drop_cutoff_front(remaining)
+
+    poly: list[tuple[float, float]] = []
+    for i in range(n_bins):
+        r = max(0.0, remaining[i])
+        if r > 0:
+            r += margin
+        poly.append((float(r), float(z_bins[i])))
+    return poly
