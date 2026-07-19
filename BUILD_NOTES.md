@@ -48,3 +48,24 @@ Open **http://localhost:8360** in the browser.
   - `dict_keys(['timeline', 'envelopes', 'carve_keyframes', 'green_zone', 'collisions'])`
   - Timeline length: 1786 frames
   - Keyframes count: 40 frames
+
+## 2D Handoff Tasks Updates
+
+### 6. Part 1: Collisions Tuning & Verification (Completed)
+- **Problem**: Turning tool `T01` was colliding with the workpiece during `T01` operation and `T03` drilling/spotting operation due to incorrect tool orientation (0° instead of 90°) and zero tip offset.
+- **Orientation Tuning**: Set turning tools `T01` and `T02` to `orientation_deg = 90.0` (aligned with `-X` towards spindle center). Left boring tool `T03` at `0.0`.
+- **Holder Dimensions**: Set turning tool holder block to `20x50` and shank to `50` long (total length `100mm`).
+- **Tip Offset**: Configured `tip_v_offset` of `T01` and `T02` to `10.0mm` to shift the tool block body to the right (`+Z` direction), keeping only the insert tip on the leading edge.
+- **Mount Z Adjustments**:
+  - Shifted `T01` Z mount position to `35.0` (shift of `+5.0mm` from `30.0` via `slot_attach_z = -5.0`).
+  - Shifted `T02` Z mount position to `35.0` (shift of `+5.0mm` from `30.0` via `slot_attach_z = -5.0`).
+  - Shifted `T03` Z mount position to `33.5` (shift of `-5.0mm` from `38.5` via `slot_attach_z = -3.5`).
+- **Collision Checking Logic**: Updated `server.py` to match the 2D app's collision rule: do not check the active tool against the workpiece during its own operation (since it cuts the workpiece). Only check passive tools vs carved workpiece, and check all tools vs fixtures (chuck/jaws).
+- **Result**: Collisions list is now `[]` (zero collisions).
+
+### 7. Part 2: Ported Settings Features from 2D App (Completed)
+- **PATCH /api/profile**: Added in `server.py` to allow saving Chuck, Workpiece, Tools list, and Ref/Cand selections. Validates inputs using Pydantic, snaps slotted tools, and triggers a full safety analysis recalculation.
+- **⚙️ Settings Drawer**: Designed a sliding glass drawer on the left side of `index.html` to configure Chuck diameter/length, Workpiece diameter/length/grip, Reference/Candidate dropdowns, and custom G-code text/file uploads.
+- **Interactive Tool Cards**: Added dynamic form fields to configure all properties (mount, orientation, slots, dimensions) for each tool, with full validation.
+- **Visual Rebuild**: The page re-queries analysis and redraws the full 3D viewport (chuck, workpiece, tools, green zone) dynamically upon save or recalculation.
+

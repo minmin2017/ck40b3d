@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 profiles/
 web/vendor/*.map
+.claude/settings.local.json

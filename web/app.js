@@ -268,6 +268,22 @@ function setupEventListeners() {
             greenZoneMeshGroup.visible = showGreenZone;
         }
     });
+
+    // Settings Toggle
+    const settingsToggleBtn = document.getElementById('settings-toggle-btn');
+    const settingsDrawer = document.getElementById('settings-drawer');
+    const closeSettingsBtn = document.getElementById('close-settings-btn');
+    
+    settingsToggleBtn.addEventListener('click', () => {
+        settingsDrawer.classList.toggle('open');
+        if (settingsDrawer.classList.contains('open')) {
+            populateSettingsForm();
+        }
+    });
+    
+    closeSettingsBtn.addEventListener('click', () => {
+        settingsDrawer.classList.remove('open');
+    });
 }
 
 function onWindowResize() {
@@ -719,3 +735,321 @@ function populateCollisionLog() {
         collisionLogContainer.appendChild(el);
     });
 }
+
+// ── Settings Drawer Logic ──────────────────────────────────────────────────
+
+function renderCfgToolsList(tools) {
+    const container = document.getElementById('cfg-tools-container');
+    container.innerHTML = '';
+    
+    tools.forEach(t => {
+        const card = document.createElement('div');
+        card.className = 'cfg-tool-card';
+        card.dataset.id = t.id;
+        card.style.cssText = 'background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; margin-bottom: 8px; position: relative;';
+        
+        card.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <input type="text" class="cfg-tool-id" value="${t.id}" style="width: 50px; font-weight: bold; padding: 2px 4px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.3); color: var(--accent-blue); border-radius: 4px;" required>
+                <button type="button" class="cfg-del-tool-btn" style="background: transparent; border: none; color: var(--accent-red); cursor: pointer; font-size: 11px;">DELETE</button>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 10px;">
+                <div>
+                    <label style="color: var(--text-muted); display:block; margin-bottom:2px;">Name</label>
+                    <input type="text" class="cfg-tool-name" value="${t.name}" style="width:100%; padding:4px; border:1px solid var(--border-color); background:rgba(0,0,0,0.3); color:white; border-radius:4px;" required>
+                </div>
+                <div>
+                    <label style="color: var(--text-muted); display:block; margin-bottom:2px;">Type</label>
+                    <select class="cfg-tool-type" style="width:100%; padding:4px; border:1px solid var(--border-color); background:rgba(0,0,0,0.3); color:white; border-radius:4px;">
+                        <option value="turning_OD" ${t.type === 'turning_OD' ? 'selected' : ''}>OD Turning</option>
+                        <option value="turning_ID" ${t.type === 'turning_ID' ? 'selected' : ''}>ID Turning</option>
+                        <option value="boring" ${t.type === 'boring' ? 'selected' : ''}>Boring</option>
+                        <option value="drilling" ${t.type === 'drilling' ? 'selected' : ''}>Drilling</option>
+                        <option value="parting" ${t.type === 'parting' ? 'selected' : ''}>Parting</option>
+                        <option value="threading" ${t.type === 'threading' ? 'selected' : ''}>Threading</option>
+                        <option value="other" ${t.type === 'other' ? 'selected' : ''}>Other</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="color: var(--text-muted); display:block; margin-bottom:2px;">Mount X</label>
+                    <input type="number" step="any" class="cfg-tool-mount-x" value="${t.mount_x}" style="width:100%; padding:4px; border:1px solid var(--border-color); background:rgba(0,0,0,0.3); color:white; border-radius:4px;" required>
+                </div>
+                <div>
+                    <label style="color: var(--text-muted); display:block; margin-bottom:2px;">Mount Z</label>
+                    <input type="number" step="any" class="cfg-tool-mount-z" value="${t.mount_z}" style="width:100%; padding:4px; border:1px solid var(--border-color); background:rgba(0,0,0,0.3); color:white; border-radius:4px;" required>
+                </div>
+                <div>
+                    <label style="color: var(--text-muted); display:block; margin-bottom:2px;">Orient (deg)</label>
+                    <input type="number" step="any" class="cfg-tool-orient" value="${t.orientation_deg}" style="width:100%; padding:4px; border:1px solid var(--border-color); background:rgba(0,0,0,0.3); color:white; border-radius:4px;" required>
+                </div>
+                <div>
+                    <label style="color: var(--text-muted); display:block; margin-bottom:2px;">Slot</label>
+                    <input type="number" class="cfg-tool-slot" value="${t.slot || ''}" placeholder="None" style="width:100%; padding:4px; border:1px solid var(--border-color); background:rgba(0,0,0,0.3); color:white; border-radius:4px;">
+                </div>
+                <div>
+                    <label style="color: var(--text-muted); display:block; margin-bottom:2px;">Slot Attach Z</label>
+                    <input type="number" step="any" class="cfg-tool-slot-attach-z" value="${t.slot_attach_z || 0.0}" style="width:100%; padding:4px; border:1px solid var(--border-color); background:rgba(0,0,0,0.3); color:white; border-radius:4px;" required>
+                </div>
+                <div>
+                    <label style="color: var(--text-muted); display:block; margin-bottom:2px;">Tip dx</label>
+                    <input type="number" step="any" class="cfg-tool-tip-dx" value="${t.holder.tip_dx || 0.0}" style="width:100%; padding:4px; border:1px solid var(--border-color); background:rgba(0,0,0,0.3); color:white; border-radius:4px;" required>
+                </div>
+                <div>
+                    <label style="color: var(--text-muted); display:block; margin-bottom:2px;">Tip dz</label>
+                    <input type="number" step="any" class="cfg-tool-tip-dz" value="${t.holder.tip_dz || 0.0}" style="width:100%; padding:4px; border:1px solid var(--border-color); background:rgba(0,0,0,0.3); color:white; border-radius:4px;" required>
+                </div>
+                <div>
+                    <label style="color: var(--text-muted); display:block; margin-bottom:2px;">Block Width</label>
+                    <input type="number" step="any" class="cfg-tool-block-w" value="${t.holder.block_width}" style="width:100%; padding:4px; border:1px solid var(--border-color); background:rgba(0,0,0,0.3); color:white; border-radius:4px;" required>
+                </div>
+                <div>
+                    <label style="color: var(--text-muted); display:block; margin-bottom:2px;">Block Length</label>
+                    <input type="number" step="any" class="cfg-tool-block-l" value="${t.holder.block_length}" style="width:100%; padding:4px; border:1px solid var(--border-color); background:rgba(0,0,0,0.3); color:white; border-radius:4px;" required>
+                </div>
+                <div>
+                    <label style="color: var(--text-muted); display:block; margin-bottom:2px;">Shank Len</label>
+                    <input type="number" step="any" class="cfg-tool-shank-l" value="${t.holder.shank_length}" style="width:100%; padding:4px; border:1px solid var(--border-color); background:rgba(0,0,0,0.3); color:white; border-radius:4px;" required>
+                </div>
+                <div>
+                    <label style="color: var(--text-muted); display:block; margin-bottom:2px;">Shank Dia</label>
+                    <input type="number" step="any" class="cfg-tool-shank-d" value="${t.holder.shank_diameter}" style="width:100%; padding:4px; border:1px solid var(--border-color); background:rgba(0,0,0,0.3); color:white; border-radius:4px;" required>
+                </div>
+                <div>
+                    <label style="color: var(--text-muted); display:block; margin-bottom:2px;">Tip v offset</label>
+                    <input type="number" step="any" class="cfg-tool-v-off" value="${t.holder.tip_v_offset || 0.0}" style="width:100%; padding:4px; border:1px solid var(--border-color); background:rgba(0,0,0,0.3); color:white; border-radius:4px;" required>
+                </div>
+            </div>
+        `;
+        
+        card.querySelector('.cfg-del-tool-btn').addEventListener('click', () => {
+            card.remove();
+        });
+        
+        container.appendChild(card);
+    });
+}
+
+function getToolsFromForm() {
+    const cards = document.querySelectorAll('.cfg-tool-card');
+    const tools = [];
+    
+    cards.forEach(card => {
+        const id = card.querySelector('.cfg-tool-id').value.trim() || 'T01';
+        const name = card.querySelector('.cfg-tool-name').value.trim() || 'Unnamed';
+        const type = card.querySelector('.cfg-tool-type').value;
+        const mount_x = parseFloat(card.querySelector('.cfg-tool-mount-x').value) || 0;
+        const mount_z = parseFloat(card.querySelector('.cfg-tool-mount-z').value) || 0;
+        const orientation_deg = parseFloat(card.querySelector('.cfg-tool-orient').value) || 0;
+        
+        const slotVal = card.querySelector('.cfg-tool-slot').value.trim();
+        const slot = slotVal ? parseInt(slotVal) : null;
+        const slot_attach_z = parseFloat(card.querySelector('.cfg-tool-slot-attach-z').value) || 0;
+        
+        const tip_dx = parseFloat(card.querySelector('.cfg-tool-tip-dx').value) || 0;
+        const tip_dz = parseFloat(card.querySelector('.cfg-tool-tip-dz').value) || 0;
+        const block_width = parseFloat(card.querySelector('.cfg-tool-block-w').value) || 20;
+        const block_length = parseFloat(card.querySelector('.cfg-tool-block-l').value) || 50;
+        const shank_length = parseFloat(card.querySelector('.cfg-tool-shank-l').value) || 50;
+        const shank_diameter = parseFloat(card.querySelector('.cfg-tool-shank-d').value) || 10;
+        const tip_v_offset = parseFloat(card.querySelector('.cfg-tool-v-off').value) || 0;
+        
+        tools.push({
+            id, name, type, mount_x, mount_z, orientation_deg, slot, slot_attach_z,
+            holder: {
+                block_width, block_length, shank_length, shank_diameter, tip_v_offset, tip_dx, tip_dz
+            },
+            active_in_program: true
+        });
+    });
+    
+    return tools;
+}
+
+function populateSettingsForm() {
+    if (!apiState) return;
+    
+    // Chuck
+    document.getElementById('cfg-chuck-dia').value = apiState.chuck.body_diameter;
+    document.getElementById('cfg-chuck-len').value = apiState.chuck.body_length_z;
+    document.getElementById('cfg-jaw-prot').value = apiState.chuck.jaw_protrusion_z;
+    document.getElementById('cfg-jaw-dia').value = apiState.chuck.jaw_outer_diameter;
+    
+    // Workpiece
+    document.getElementById('cfg-wp-dia').value = apiState.workpiece.raw_diameter;
+    document.getElementById('cfg-wp-len').value = apiState.workpiece.raw_length;
+    document.getElementById('cfg-wp-grip').value = apiState.workpiece.grip_length_in_chuck;
+    
+    // Dropdowns
+    const refSelect = document.getElementById('cfg-ref-tool');
+    const candSelect = document.getElementById('cfg-cand-tool');
+    
+    refSelect.innerHTML = '';
+    candSelect.innerHTML = '';
+    
+    apiState.tools.forEach(t => {
+        const optRef = document.createElement('option');
+        optRef.value = t.id;
+        optRef.text = t.id;
+        optRef.selected = (t.id === apiState.reference_tool_id);
+        refSelect.appendChild(optRef);
+        
+        const optCand = document.createElement('option');
+        optCand.value = t.id;
+        optCand.text = t.id;
+        optCand.selected = (t.id === apiState.candidate_tool_id);
+        candSelect.appendChild(optCand);
+    });
+    
+    // Tools list
+    renderCfgToolsList(apiState.tools);
+}
+
+// Bind Settings events
+document.getElementById('cfg-add-tool-btn').addEventListener('click', () => {
+    const list = getToolsFromForm();
+    list.push({
+        id: 'T' + String(list.length + 1).padStart(2, '0'),
+        name: 'New Tool',
+        type: 'turning_OD',
+        mount_x: 50.0,
+        mount_z: 30.0,
+        orientation_deg: 90.0,
+        holder: {
+            block_width: 20.0,
+            block_length: 50.0,
+            shank_length: 50.0,
+            shank_diameter: 10.0,
+            tip_v_offset: 10.0,
+            tip_dx: 0.0,
+            tip_dz: 0.0
+        }
+    });
+    renderCfgToolsList(list);
+});
+
+document.getElementById('cfg-load-gcode-btn').addEventListener('click', async () => {
+    const text = document.getElementById('cfg-gcode-text').value.trim();
+    const path = document.getElementById('cfg-gcode-path').value.trim();
+    
+    const payload = {};
+    if (path) {
+        payload.path = path;
+    } else if (text) {
+        payload.text = text;
+    } else {
+        alert('กรุณากรอก G-code หรือระบุพาธของไฟล์');
+        return;
+    }
+    
+    try {
+        loader.style.display = 'flex';
+        loader.style.opacity = '1';
+        document.getElementById('loader-text').innerText = 'กำลังอัปโหลด G-code...';
+        
+        const res = await fetch('http://127.0.0.1:8360/api/gcode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        
+        if (!res.ok) {
+            const errData = await res.json();
+            throw new Error(errData.detail || 'Failed to upload G-code');
+        }
+        
+        const result = await res.json();
+        alert(`โหลดสำเร็จ! จำนวนบล็อก: ${result.blocks}`);
+        
+        // Refresh analysis & state
+        await loadData();
+    } catch (e) {
+        alert(`ข้อผิดพลาด: ${e.message}`);
+        loader.style.opacity = '0';
+        setTimeout(() => loader.style.display = 'none', 500);
+    }
+});
+
+document.getElementById('cfg-save-btn').addEventListener('click', async () => {
+    // Validate chuck/workpiece
+    const chuck_dia = parseFloat(document.getElementById('cfg-chuck-dia').value);
+    const chuck_len = parseFloat(document.getElementById('cfg-chuck-len').value);
+    const jaw_prot = parseFloat(document.getElementById('cfg-jaw-prot').value);
+    const jaw_dia = parseFloat(document.getElementById('cfg-jaw-dia').value);
+    
+    const wp_dia = parseFloat(document.getElementById('cfg-wp-dia').value);
+    const wp_len = parseFloat(document.getElementById('cfg-wp-len').value);
+    const wp_grip = parseFloat(document.getElementById('cfg-wp-grip').value);
+    
+    if ([chuck_dia, chuck_len, jaw_prot, jaw_dia, wp_dia, wp_len, wp_grip].some(isNaN)) {
+        alert('กรุณากรอกค่าตัวเลขให้ถูกต้อง');
+        return;
+    }
+    
+    const tools = getToolsFromForm();
+    // Validate tools
+    for (let t of tools) {
+        if (t.id === '') {
+            alert('กรุณากรอก Tool ID ของทุกตัว');
+            return;
+        }
+        if ([t.mount_x, t.mount_z, t.orientation_deg, t.holder.block_width, t.holder.block_length, t.holder.shank_length, t.holder.shank_diameter, t.holder.tip_v_offset].some(isNaN)) {
+            alert(`ข้อมูลทูล ${t.id} ไม่ถูกต้อง (ค่าตัวเลขห้ามว่าง)`);
+            return;
+        }
+    }
+    
+    const ref_tool_id = document.getElementById('cfg-ref-tool').value;
+    const cand_tool_id = document.getElementById('cfg-cand-tool').value;
+    
+    const payload = {
+        chuck: {
+            body_diameter: chuck_dia,
+            body_length_z: chuck_len,
+            jaw_protrusion_z: jaw_prot,
+            jaw_outer_diameter: jaw_dia
+        },
+        workpiece: {
+            raw_diameter: wp_dia,
+            raw_length: wp_len,
+            grip_length_in_chuck: wp_grip,
+            z_face_position: apiState.workpiece.z_face_position
+        },
+        tools,
+        reference_tool_id: ref_tool_id,
+        candidate_tool_id: cand_tool_id
+    };
+    
+    try {
+        loader.style.display = 'flex';
+        loader.style.opacity = '1';
+        document.getElementById('loader-text').innerText = 'กำลังบันทึกและคำนวณความปลอดภัยใหม่...';
+        
+        const res = await fetch('http://127.0.0.1:8360/api/profile', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        
+        if (!res.ok) {
+            const errData = await res.json();
+            throw new Error(errData.detail || 'Failed to update profile');
+        }
+        
+        // Close drawer
+        document.getElementById('settings-drawer').classList.remove('open');
+        
+        // Reload and rebuild scene
+        await loadData();
+        
+        // Reset index to beginning after changes
+        timelineIndex = 0;
+        scrubber.value = 0;
+        updatePlaybackUI();
+        
+    } catch (e) {
+        alert(`ข้อผิดพลาด: ${e.message}`);
+        loader.style.opacity = '0';
+        setTimeout(() => loader.style.display = 'none', 500);
+    }
+});
+

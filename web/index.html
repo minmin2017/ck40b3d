@@ -381,6 +381,31 @@
             margin-right: 4px;
         }
 
+        /* Settings Drawer CSS */
+        #settings-drawer {
+            top: 20px;
+            left: 20px;
+            bottom: 120px;
+            width: 390px;
+            background: var(--bg-panel);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            overflow-y: auto;
+            transform: translateX(-430px);
+            transition: transform 0.3s ease-in-out;
+            z-index: 100;
+        }
+
+        #settings-drawer.open {
+            transform: translateX(0);
+            display: flex !important;
+        }
+
         /* Loading Panel */
         #loader {
             position: absolute;
@@ -466,6 +491,99 @@
         </div>
     </div>
 
+    <!-- Settings Drawer (Left Side) -->
+    <div id="settings-drawer" class="overlay" style="display: none;">
+        <div class="drawer-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+            <h2 style="font-size: 15px; font-weight: 800; color: var(--accent-blue);">⚙️ MACHINE CONFIGURATION</h2>
+            <button id="close-settings-btn" style="background: transparent; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; font-weight: bold;">&times;</button>
+        </div>
+        
+        <form id="settings-form" onsubmit="return false;">
+            <!-- Chuck Configuration -->
+            <div class="settings-group" style="margin-bottom: 18px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
+                <h3 style="font-size: 12px; font-weight: 600; color: var(--text-main); margin-bottom: 8px; text-transform: uppercase;">หัวจับ / Chuck (mm)</h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                    <div>
+                        <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 2px;">Body Dia (Ø)</label>
+                        <input type="number" id="cfg-chuck-dia" step="any" style="width: 100%; padding: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.3); color: white; border-radius: 4px; font-size: 11px;" required>
+                    </div>
+                    <div>
+                        <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 2px;">Body Length Z</label>
+                        <input type="number" id="cfg-chuck-len" step="any" style="width: 100%; padding: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.3); color: white; border-radius: 4px; font-size: 11px;" required>
+                    </div>
+                    <div>
+                        <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 2px;">Jaw Prot Z</label>
+                        <input type="number" id="cfg-jaw-prot" step="any" style="width: 100%; padding: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.3); color: white; border-radius: 4px; font-size: 11px;" required>
+                    </div>
+                    <div>
+                        <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 2px;">Jaw Outer Dia</label>
+                        <input type="number" id="cfg-jaw-dia" step="any" style="width: 100%; padding: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.3); color: white; border-radius: 4px; font-size: 11px;" required>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Workpiece Configuration -->
+            <div class="settings-group" style="margin-bottom: 18px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
+                <h3 style="font-size: 12px; font-weight: 600; color: var(--text-main); margin-bottom: 8px; text-transform: uppercase;">ชิ้นงาน / Workpiece (mm)</h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                    <div>
+                        <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 2px;">Raw Dia (Ø)</label>
+                        <input type="number" id="cfg-wp-dia" step="any" style="width: 100%; padding: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.3); color: white; border-radius: 4px; font-size: 11px;" required>
+                    </div>
+                    <div>
+                        <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 2px;">Raw Length</label>
+                        <input type="number" id="cfg-wp-len" step="any" style="width: 100%; padding: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.3); color: white; border-radius: 4px; font-size: 11px;" required>
+                    </div>
+                    <div style="grid-column: span 2;">
+                        <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 2px;">Grip in Chuck</label>
+                        <input type="number" id="cfg-wp-grip" step="any" style="width: 100%; padding: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.3); color: white; border-radius: 4px; font-size: 11px;" required>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Program Reference & Candidate Tool -->
+            <div class="settings-group" style="margin-bottom: 18px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
+                <h3 style="font-size: 12px; font-weight: 600; color: var(--text-main); margin-bottom: 8px; text-transform: uppercase;">การอ้างอิงและทูลเป้าหมาย / Reference & Candidate</h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                    <div>
+                        <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 2px;">Reference Tool</label>
+                        <select id="cfg-ref-tool" style="width: 100%; padding: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.3); color: white; border-radius: 4px; font-size: 11px;"></select>
+                    </div>
+                    <div>
+                        <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 2px;">Candidate Tool</label>
+                        <select id="cfg-cand-tool" style="width: 100%; padding: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.3); color: white; border-radius: 4px; font-size: 11px;"></select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- G-Code Program Loader -->
+            <div class="settings-group" style="margin-bottom: 18px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
+                <h3 style="font-size: 12px; font-weight: 600; color: var(--text-main); margin-bottom: 8px; text-transform: uppercase;">โหลด G-code / Upload G-code</h3>
+                <textarea id="cfg-gcode-text" placeholder="วางโค้ดตรงนี้ (Paste G-code here)..." style="width: 100%; height: 80px; padding: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.3); color: white; border-radius: 4px; font-family: var(--font-mono); font-size: 10px; resize: vertical;"></textarea>
+                <div style="margin-top: 6px; display: flex; gap: 6px;">
+                    <input type="text" id="cfg-gcode-path" placeholder="หรือใส่ที่อยู่ไฟล์ (Or abs path)..." style="flex: 1; padding: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.3); color: white; border-radius: 4px; font-size: 11px;">
+                    <button type="button" class="btn" id="cfg-load-gcode-btn" style="padding: 4px 10px;">LOAD</button>
+                </div>
+            </div>
+
+            <!-- Tools Configuration -->
+            <div class="settings-group" style="margin-bottom: 18px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <h3 style="font-size: 12px; font-weight: 600; color: var(--text-main); text-transform: uppercase; margin: 0;">ตั้งค่าทูล / Tool Configurations</h3>
+                    <button type="button" class="btn" id="cfg-add-tool-btn" style="padding: 2px 8px; font-size: 11px;">+ ADD</button>
+                </div>
+                <div id="cfg-tools-container" style="max-height: 250px; overflow-y: auto; padding-right: 4px;">
+                    <!-- Tool forms injected dynamically -->
+                </div>
+            </div>
+
+            <!-- Form Actions -->
+            <div style="display: flex; gap: 10px; margin-top: 15px; padding-bottom: 20px;">
+                <button type="button" class="btn btn-green-active" id="cfg-save-btn" style="flex: 1;">คำนวณใหม่ / RECOMPUTE</button>
+            </div>
+        </form>
+    </div>
+
     <!-- Sidebar Overlay (Right) -->
     <div id="sidebar" class="overlay">
         <!-- Tools Section -->
@@ -508,6 +626,7 @@
 
         <!-- Camera Presets / Toggles -->
         <div class="view-section">
+            <button class="btn" id="settings-toggle-btn" style="margin-right: 15px;">⚙️ SETTINGS</button>
             <button class="btn" id="green-zone-btn" style="margin-right: 15px;">GREEN ZONE</button>
             <span class="view-lbl">มุมกล้อง / Cam:</span>
             <button class="btn" id="cam-preset-iso">3/4 ISO</button>

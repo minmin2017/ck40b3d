@@ -313,22 +313,37 @@ def get_analysis():
     envs_np = {tid: np.asarray(pts, dtype=float) for tid, pts in envs_by_tid.items() if pts}
     cut_envs = per_tool_cutting_envelopes(blocks, step=1.0)
     
-    # We check against chuck + jaws + workpiece
-    obstacles = obstacles_polygon(p, cutting_envelopes=cut_envs, include_workpiece=True)
+    # We check against chuck + jaws (fixtures) for all envelopes,
+    # and against workpiece (carved) only for other tools' envelopes.
+    fixtures = obstacles_polygon(p, include_workpiece=False)
+    carved = obstacles_polygon(p, cutting_envelopes=cut_envs, include_workpiece=True)
     
     collisions = []
     for tool in p.tools:
         try:
-            has_col, hits = check_collision_for_tool(tool, (0, 0), envs_np, obstacles, p, sample_stride=2)
-            if has_col:
-                for active_tid, local_idx in hits:
-                    # Map local envelope index to global timeline index
+            # 1. Check against fixtures (chuck/jaws) - all envelopes
+            has_col_fix, hits_fix = check_collision_for_tool(tool, (0, 0), envs_np, fixtures, p, sample_stride=2)
+            if has_col_fix:
+                for active_tid, local_idx in hits_fix:
                     timeline_idx = indices_by_tid[active_tid][local_idx]
                     collisions.append({
                         "tool_id": tool.id,
                         "i": timeline_idx,
-                        "msg": f"ชน {tool.name} ระหว่างทำงานของ {active_tid}"
+                        "msg": f"ชน {tool.name} กับหัวจับ/ฟิกซ์เจอร์ ระหว่างทำงานของ {active_tid}"
                     })
+            else:
+                # 2. Check against carved workpiece - only other tools
+                other_envs = {tid: e for tid, e in envs_np.items() if tid != tool.id}
+                if other_envs:
+                    has_col_wp, hits_wp = check_collision_for_tool(tool, (0, 0), other_envs, carved, p, sample_stride=2)
+                    if has_col_wp:
+                        for active_tid, local_idx in hits_wp:
+                            timeline_idx = indices_by_tid[active_tid][local_idx]
+                            collisions.append({
+                                "tool_id": tool.id,
+                                "i": timeline_idx,
+                                "msg": f"ชน {tool.name} กับชิ้นงาน ระหว่างทำงานของ {active_tid}"
+                            })
         except Exception as e:
             print(f"Error checking collision for tool {tool.id}: {e}")
             
@@ -339,6 +354,48 @@ def get_analysis():
         "green_zone": green_zone_data,
         "collisions": collisions
     }
+
+@app.patch("/api/profile")
+def patch_profile(update: dict):
+    p = get_or_create_default_profile()
+    
+    try:
+        # 1. Update chuck
+        if "chuck" in update and update["chuck"]:
+            from ck40b_sim.models import Chuck
+            p.chuck = Chuck.model_validate(update["chuck"])
+            
+        # 2. Update workpiece
+        if "workpiece" in update and update["workpiece"]:
+            from ck40b_sim.models import Workpiece
+            p.workpiece = Workpiece.model_validate(update["workpiece"])
+            
+        # 3. Update tools
+        if "tools" in update and update["tools"] is not None:
+            from ck40b_sim.models import Tool
+            new_tools = []
+            for t_dict in update["tools"]:
+                new_tools.append(Tool.model_validate(t_dict))
+            p.tools = new_tools
+            
+        # 4. Update reference tool
+        if "reference_tool_id" in update and update["reference_tool_id"]:
+            p.reference_tool_id = update["reference_tool_id"]
+            
+        # 5. Update candidate tool
+        if "candidate_tool_id" in update and update["candidate_tool_id"]:
+            state_db["candidate_tool_id"] = update["candidate_tool_id"]
+            
+        p.snap_all_slotted()
+        save_profile(p)
+        
+        # Reload G-code if available to refresh timeline/collisions with the new profile
+        if state_db["gcode_text"]:
+            load_gcode_program(state_db["gcode_text"], state_db["gcode_name"])
+            
+        return get_state()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid profile data: {e}")
 
 # Mount static web directory
 app.mount("/", StaticFiles(directory="web", html=True), name="web")
