@@ -289,12 +289,69 @@ function setupEventListeners() {
         settingsDrawer.classList.toggle('open');
         if (settingsDrawer.classList.contains('open')) {
             populateSettingsForm();
+            loadAndRenderSetups();
         }
     });
     
     closeSettingsBtn.addEventListener('click', () => {
         settingsDrawer.classList.remove('open');
     });
+
+    // Layout Packing Button
+    const layoutPackBtn = document.getElementById('layout-pack-btn');
+    if (layoutPackBtn) {
+        layoutPackBtn.addEventListener('click', async () => {
+            const ok = confirm("จะย้ายตำแหน่ง tool บนโต๊ะจริง (เซฟ Setup ไว้ก่อนได้ในหน้า ⚙) — ทำต่อไหม?");
+            if (!ok) return;
+
+            // Gather checked tools
+            const checked = Array.from(document.querySelectorAll('.tool-select-chk:checked')).map(chk => chk.dataset.id);
+            if (checked.length < 2) {
+                alert("กรุณาเลือกทูลอย่างน้อย 2 ตัวในเมนูด้านข้างเพื่อจัดเรียง");
+                return;
+            }
+
+            try {
+                loader.style.display = 'flex';
+                loader.style.opacity = '1';
+                document.getElementById('loader-text').innerText = 'กำลังจัดเรียง+เช็คโซนปลอดภัย...';
+
+                const res = await fetch('http://127.0.0.1:8360/api/layout/pack', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tools: checked, green_align: true })
+                });
+
+                if (!res.ok) {
+                    const errData = await res.json();
+                    throw new Error(errData.detail || 'Failed to pack layout');
+                }
+
+                const result = await res.json();
+                
+                // Show summary dialog
+                let msg = `จัดเรียงสำเร็จ! โหมดความปลอดภัย: ${result.mode || 'None'}\n\n`;
+                if (result.unsafe_ids && result.unsafe_ids.length > 0) {
+                    msg += `⚠️ ทูลที่ไม่มีพื้นที่ปลอดภัย (unsafe): ${result.unsafe_ids.join(', ')}\n\n`;
+                }
+                if (result.deltas && result.deltas.length > 0) {
+                    msg += `ระยะห่างแต่ละคู่:\n`;
+                    result.deltas.forEach(d => {
+                        msg += `- ${d.a} กับ ${d.b}: dz = ${d.dz} mm, dx = ${d.dx} mm\n`;
+                    });
+                }
+                alert(msg);
+
+                // Rebuild scene
+                await loadData();
+            } catch (err) {
+                alert(`เกิดข้อผิดพลาด: ${err.message}`);
+            } finally {
+                loader.style.opacity = '0';
+                setTimeout(() => loader.style.display = 'none', 500);
+            }
+        });
+    }
 }
 
 function onWindowResize() {
@@ -1297,6 +1354,93 @@ function drawAdvancedGreenZones(data, type) {
                 }
             }
         });
+    }
+}
+
+async function loadAndRenderSetups() {
+    try {
+        const res = await fetch('http://127.0.0.1:8360/api/layout/setups');
+        if (!res.ok) throw new Error('Failed to load setups');
+        const data = await res.json();
+        renderSetupsList(data.setups);
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+function renderSetupsList(setups) {
+    const container = document.getElementById('position-setups-container');
+    if (!container) return;
+    container.innerHTML = '';
+    
+    for (let n = 1; n <= 4; n++) {
+        const slotStr = String(n);
+        const setup = setups[slotStr];
+        
+        const row = document.createElement('div');
+        row.style.cssText = 'display: flex; justify-content: space-between; align-items: center; font-size: 11px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.03);';
+        
+        const label = setup 
+            ? `Setup ${n}: ${setup.n_tools} tools · ${setup.saved_at}` 
+            : `Setup ${n}: ว่าง`;
+            
+        row.innerHTML = `
+            <span style="color: var(--text-main); font-weight: 500;">${label}</span>
+            <div style="display: flex; gap: 6px;">
+                <button type="button" class="btn btn-save-setup" data-id="${n}" style="padding: 2px 8px; font-size: 10px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color);">💾 Save</button>
+                <button type="button" class="btn btn-load-setup" data-id="${n}" style="padding: 2px 8px; font-size: 10px; background: #ffaa00; border: 1px solid #ffaa00; color: #000; font-weight: bold;" ${!setup ? 'disabled style="opacity: 0.4; cursor: not-allowed; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: var(--text-muted);"' : ''}>📂 Load</button>
+            </div>
+        `;
+        
+        // Save handler
+        row.querySelector('.btn-save-setup').addEventListener('click', async () => {
+            if (setup) {
+                const ok = confirm(`Setup ${n} มีข้อมูลอยู่แล้ว ต้องการบันทึกทับใช่ไหม?`);
+                if (!ok) return;
+            }
+            try {
+                loader.style.display = 'flex';
+                loader.style.opacity = '1';
+                const resSave = await fetch(`http://127.0.0.1:8360/api/layout/setups/${n}/save`, { method: 'POST' });
+                if (!resSave.ok) throw new Error('Failed to save setup');
+                const updated = await resSave.json();
+                renderSetupsList(updated.setups);
+                alert(`บันทึก Setup ${n} สำเร็จ!`);
+            } catch (err) {
+                alert(`เกิดข้อผิดพลาด: ${err.message}`);
+            } finally {
+                loader.style.opacity = '0';
+                setTimeout(() => loader.style.display = 'none', 500);
+            }
+        });
+        
+        // Load handler
+        if (setup) {
+            row.querySelector('.btn-load-setup').addEventListener('click', async () => {
+                try {
+                    loader.style.display = 'flex';
+                    loader.style.opacity = '1';
+                    const resLoad = await fetch(`http://127.0.0.1:8360/api/layout/setups/${n}/load`, { method: 'POST' });
+                    if (!resLoad.ok) throw new Error('Failed to load setup');
+                    const result = await resLoad.json();
+                    
+                    // Close drawer
+                    document.getElementById('settings-drawer').classList.remove('open');
+                    
+                    // Reload data & rebuild scene
+                    await loadData();
+                    
+                    alert(`โหลด Setup ${n} สำเร็จ! นำไปใช้กับทูล ${result.applied} ตัว`);
+                } catch (err) {
+                    alert(`เกิดข้อผิดพลาด: ${err.message}`);
+                } finally {
+                    loader.style.opacity = '0';
+                    setTimeout(() => loader.style.display = 'none', 500);
+                }
+            });
+        }
+        
+        container.appendChild(row);
     }
 }
 
