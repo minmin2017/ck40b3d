@@ -42,6 +42,12 @@ let collisionMarker = null;
 // Materials cache
 let materials = {};
 
+// Advanced Green Zone Globals
+let greenZoneMode = 'OFF'; // OFF | CAND | GANG | ALL
+let gangZoneCache = null;
+let allZoneCache = null;
+let gangAllZonesGroup = null;
+
 // Initial Init
 init();
 
@@ -260,13 +266,18 @@ function setupEventListeners() {
     camTopBtn.addEventListener('click', () => setCameraPreset('top'));
 
     // Green zone toggle
-    let showGreenZone = false;
-    greenZoneBtn.addEventListener('click', () => {
-        showGreenZone = !showGreenZone;
-        greenZoneBtn.className = showGreenZone ? 'btn btn-green-active' : 'btn';
-        if (greenZoneMeshGroup) {
-            greenZoneMeshGroup.visible = showGreenZone;
+    // Green zone toggle (4 states cycle)
+    greenZoneBtn.addEventListener('click', async () => {
+        if (greenZoneMode === 'OFF') {
+            greenZoneMode = 'CAND';
+        } else if (greenZoneMode === 'CAND') {
+            greenZoneMode = 'GANG';
+        } else if (greenZoneMode === 'GANG') {
+            greenZoneMode = 'ALL';
+        } else {
+            greenZoneMode = 'OFF';
         }
+        await updateGreenZoneVisibility();
     });
 
     // Settings Toggle
@@ -295,6 +306,17 @@ function onWindowResize() {
 // Fetch backend data
 async function loadData() {
     try {
+        // Clear advanced green zone cache and reset to OFF
+        gangZoneCache = null;
+        allZoneCache = null;
+        greenZoneMode = 'OFF';
+        greenZoneBtn.className = 'btn';
+        greenZoneBtn.innerText = 'ZONE: OFF';
+        if (gangAllZonesGroup) {
+            scene.remove(gangAllZonesGroup);
+            gangAllZonesGroup = null;
+        }
+
         const resState = await fetch('http://127.0.0.1:8360/api/state');
         apiState = await resState.json();
 
@@ -700,9 +722,47 @@ function populateToolList() {
         
         el.innerHTML = `
             <div class="tool-color-dot" style="background: ${t.color || '#1f77b4'}"></div>
-            <div class="tool-name">${t.id} - ${t.name}${isRef}${isCand}</div>
-            <div class="tool-type">${t.type}</div>
+            <div class="tool-name" style="flex: 1;">
+                <div>${t.id} - ${t.name}${isRef}${isCand}</div>
+                <div class="tool-type" style="font-size: 10px; color: var(--text-muted);">${t.type}</div>
+            </div>
+            <input type="checkbox" class="tool-select-chk" data-id="${t.id}" checked style="cursor: pointer; width: 14px; height: 14px; margin-left: 8px;">
         `;
+        
+        const chk = el.querySelector('.tool-select-chk');
+        chk.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+        chk.addEventListener('change', async (e) => {
+            gangZoneCache = null;
+            allZoneCache = null;
+            if (greenZoneMode === 'GANG' || greenZoneMode === 'ALL') {
+                await updateGreenZoneVisibility();
+            }
+        });
+        
+        el.addEventListener('click', async () => {
+            if (t.id !== apiState.candidate_tool_id) {
+                try {
+                    loader.style.display = 'flex';
+                    loader.style.opacity = '1';
+                    document.getElementById('loader-text').innerText = 'กำลังเปลี่ยน Candidate Tool...';
+                    const res = await fetch('http://127.0.0.1:8360/api/profile', {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ candidate_tool_id: t.id })
+                    });
+                    if (res.ok) {
+                        await loadData();
+                    }
+                } catch (err) {
+                    console.error(err);
+                } finally {
+                    loader.style.opacity = '0';
+                    setTimeout(() => loader.style.display = 'none', 500);
+                }
+            }
+        });
         
         toolListContainer.appendChild(el);
     });
@@ -1087,4 +1147,156 @@ document.getElementById('cfg-save-btn').addEventListener('click', async () => {
         setTimeout(() => loader.style.display = 'none', 500);
     }
 });
+
+async function updateGreenZoneVisibility() {
+    // 1. Reset visibility of groups
+    if (greenZoneMeshGroup) {
+        greenZoneMeshGroup.visible = false;
+    }
+    if (gangAllZonesGroup) {
+        gangAllZonesGroup.visible = false;
+    }
+
+    if (greenZoneMode === 'OFF') {
+        greenZoneBtn.className = 'btn';
+        greenZoneBtn.innerText = 'ZONE: OFF';
+    } 
+    else if (greenZoneMode === 'CAND') {
+        greenZoneBtn.className = 'btn btn-green-active';
+        greenZoneBtn.innerText = 'ZONE: เดี่ยว';
+        if (greenZoneMeshGroup) {
+            greenZoneMeshGroup.visible = true;
+        }
+    } 
+    else if (greenZoneMode === 'GANG') {
+        greenZoneBtn.className = 'btn btn-green-active';
+        greenZoneBtn.innerText = 'ZONE: ทั้งแก๊ง';
+        
+        // Get checked tools
+        const checked = Array.from(document.querySelectorAll('.tool-select-chk:checked')).map(chk => chk.dataset.id);
+        const toolsParam = checked.join(',');
+        
+        if (!gangZoneCache) {
+            try {
+                loader.style.display = 'flex';
+                loader.style.opacity = '1';
+                document.getElementById('loader-text').innerText = 'กำลังคำนวณโซนปลอดภัย อาจใช้เวลา ~1 นาที...';
+                
+                const res = await fetch(`http://127.0.0.1:8360/api/green-zones?mode=global&tools=${toolsParam}`);
+                if (!res.ok) {
+                    throw new Error('Failed to fetch global green zones');
+                }
+                gangZoneCache = await res.json();
+            } catch (err) {
+                console.error(err);
+                alert('เกิดข้อผิดพลาดในการคำนวณโซนปลอดภัย');
+                greenZoneMode = 'OFF';
+                await updateGreenZoneVisibility();
+                return;
+            } finally {
+                loader.style.opacity = '0';
+                setTimeout(() => loader.style.display = 'none', 500);
+            }
+        }
+        
+        drawAdvancedGreenZones(gangZoneCache, 'global');
+        if (gangAllZonesGroup) {
+            gangAllZonesGroup.visible = true;
+        }
+    } 
+    else if (greenZoneMode === 'ALL') {
+        greenZoneBtn.className = 'btn btn-green-active';
+        greenZoneBtn.innerText = 'ZONE: รายตัว';
+        
+        // Get checked tools
+        const checked = Array.from(document.querySelectorAll('.tool-select-chk:checked')).map(chk => chk.dataset.id);
+        const toolsParam = checked.join(',');
+        
+        if (!allZoneCache) {
+            try {
+                loader.style.display = 'flex';
+                loader.style.opacity = '1';
+                document.getElementById('loader-text').innerText = 'กำลังคำนวณโซนปลอดภัย อาจใช้เวลา ~1 นาที...';
+                
+                const res = await fetch(`http://127.0.0.1:8360/api/green-zones?mode=per_tool&tools=${toolsParam}`);
+                if (!res.ok) {
+                    throw new Error('Failed to fetch per-tool green zones');
+                }
+                allZoneCache = await res.json();
+            } catch (err) {
+                console.error(err);
+                alert('เกิดข้อผิดพลาดในการคำนวณโซนปลอดภัย');
+                greenZoneMode = 'OFF';
+                await updateGreenZoneVisibility();
+                return;
+            } finally {
+                loader.style.opacity = '0';
+                setTimeout(() => loader.style.display = 'none', 500);
+            }
+        }
+        
+        drawAdvancedGreenZones(allZoneCache, 'per_tool');
+        if (gangAllZonesGroup) {
+            gangAllZonesGroup.visible = true;
+        }
+    }
+}
+
+function drawAdvancedGreenZones(data, type) {
+    if (gangAllZonesGroup) {
+        scene.remove(gangAllZonesGroup);
+    }
+    gangAllZonesGroup = new THREE.Group();
+    scene.add(gangAllZonesGroup);
+    
+    const thickness = 6;
+    
+    if (type === 'global') {
+        const { x0, z0, dx, dz, nx, nz, mask } = data;
+        if (!mask || mask.length === 0) return;
+        
+        const cellGeo = new THREE.BoxGeometry(dz, thickness, dx);
+        for (let iz = 0; iz < nz; iz++) {
+            for (let ix = 0; ix < nx; ix++) {
+                const val = mask[iz * nx + ix];
+                if (val === 1) {
+                    const cellMesh = new THREE.Mesh(cellGeo, materials.greenZone);
+                    cellMesh.position.set(z0 + iz * dz, TABLE_TOP_Y + thickness / 2 + 0.5, x0 + ix * dx);
+                    gangAllZonesGroup.add(cellMesh);
+                }
+            }
+        }
+    } 
+    else if (type === 'per_tool') {
+        const { zones } = data;
+        if (!zones || zones.length === 0) return;
+        
+        zones.forEach((zone, idx) => {
+            const { tool_id, x0, z0, dx, dz, nx, nz, mask } = zone;
+            const toolColor = apiState.tools.find(t => t.id === tool_id)?.color || '#1f77b4';
+            
+            const toolZoneMat = new THREE.MeshStandardMaterial({
+                color: toolColor,
+                transparent: true,
+                opacity: 0.35,
+                metalness: 0.1,
+                roughness: 0.8
+            });
+            
+            const y_pos = TABLE_TOP_Y + thickness / 2 + 0.5 + 0.3 * idx;
+            const cellGeo = new THREE.BoxGeometry(dz, thickness, dx);
+            
+            for (let iz = 0; iz < nz; iz++) {
+                for (let ix = 0; ix < nx; ix++) {
+                    const val = mask[iz * nx + ix];
+                    if (val === 1) {
+                        const cellMesh = new THREE.Mesh(cellGeo, toolZoneMat);
+                        cellMesh.position.set(z0 + iz * dz, y_pos, x0 + ix * dx);
+                        gangAllZonesGroup.add(cellMesh);
+                    }
+                }
+            }
+        });
+    }
+}
 

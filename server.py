@@ -417,6 +417,170 @@ def patch_profile(update: dict):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid profile data: {e}")
 
+# Single-entry cache for GET /api/green-zones
+_zones_cache = {"key": None, "result": None}
+
+def intersect_green_zones(all_zones, step):
+    """Intersect several per-tool green-zone grids into one tip-world grid."""
+    x_lo = min(az[3] + az[1][0]  for az in all_zones)
+    x_hi = max(az[3] + az[1][-1] for az in all_zones)
+    z_lo = min(az[4] + az[2][0]  for az in all_zones)
+    z_hi = max(az[4] + az[2][-1] for az in all_zones)
+    world_xs = np.arange(x_lo, x_hi + step * 0.5, step)  # vertical (X)
+    world_zs = np.arange(z_lo, z_hi + step * 0.5, step)  # horizontal (Z)
+
+    inter = np.ones((len(world_zs), len(world_xs)), dtype=np.int8)  # (nz, nx)
+    for grid, xs, zs, ax, az in all_zones:
+        grid = np.asarray(grid)
+        ix = np.round((world_xs - ax - xs[0]) / step).astype(int)  # len nx
+        iz = np.round((world_zs - az - zs[0]) / step).astype(int)  # len nz
+        ix_ok = (ix >= 0) & (ix < grid.shape[1])
+        iz_ok = (iz >= 0) & (iz < grid.shape[0])
+        ixc = np.clip(ix, 0, grid.shape[1] - 1)
+        izc = np.clip(iz, 0, grid.shape[0] - 1)
+        sub = (grid[np.ix_(izc, ixc)] == 1)           # (nz, nx)
+        sub &= iz_ok[:, None] & ix_ok[None, :]         # out-of-range = unsafe
+        inter &= sub.astype(np.int8)
+    return inter, world_xs, world_zs
+
+def _tool_green_zone(p, tool, envs_np, cut_envs, step, check_tool_overlap):
+    from math import ceil
+    s = p.machine.slide_table
+    _EXPAND = 20.0  # mm beyond slide-table edges for a wider safe-zone view
+    n_low_x = int(ceil((tool.mount_x - s.x_min + _EXPAND) / step))
+    n_hi_x = int(ceil((s.x_max - tool.mount_x + _EXPAND) / step))
+    n_low_z = int(ceil((tool.mount_z - s.z_min + _EXPAND) / step))
+    n_hi_z = int(ceil((s.z_max - tool.mount_z + _EXPAND) / step))
+    grid_x = (-n_low_x * step, n_hi_x * step, step)
+    grid_z = (-n_low_z * step, n_hi_z * step, step)
+    grid, xs, zs = compute_green_zone_grid(
+        p, envs_np, tool,
+        cutting_envelopes=cut_envs,
+        grid_x=grid_x, grid_z=grid_z,
+        sample_stride=1,
+        consider_table=p.green_zone_consider_table,
+        check_tool_overlap=check_tool_overlap,
+    )
+    anchor_x, anchor_z = p.home_tip(tool)
+    return grid, xs, zs, anchor_x, anchor_z
+
+@app.get("/api/green-zones")
+def get_green_zones(mode: str, tools: Optional[str] = None):
+    p = get_or_create_default_profile()
+    
+    # Compute cache key
+    p_dict = p.model_dump()
+    p_json = json.dumps(p_dict, sort_keys=True)
+    gcode = state_db.get("gcode_text", "")
+    
+    # Resolve tools list
+    if tools:
+        tools_list = [t.strip() for t in tools.split(",") if t.strip()]
+    else:
+        tools_list = [t.id for t in p.tools]
+        
+    tools_str = ",".join(sorted(tools_list))
+    raw_key = f"{p_json}||{gcode}||{mode}||{tools_str}"
+    cache_key = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+    
+    if _zones_cache["key"] == cache_key:
+        return _zones_cache["result"]
+        
+    blocks = state_db["blocks"]
+    frames = state_db["frames"]
+    
+    if not blocks:
+        if mode == "per_tool":
+            res = {"mode": "per_tool", "zones": []}
+        else:
+            res = {
+                "mode": "global",
+                "x0": 0.0,
+                "z0": 0.0,
+                "dx": 2.0,
+                "dz": 2.0,
+                "nx": 0,
+                "nz": 0,
+                "mask": [],
+                "n_tools": 0
+            }
+        _zones_cache["key"] = cache_key
+        _zones_cache["result"] = res
+        return res
+        
+    # Active tool path envelopes
+    envs_by_tid = {}
+    for f in frames:
+        envs_by_tid.setdefault(f.active_tool_id, []).append((f.tip_x, f.tip_z))
+    envs_np = {tid: np.asarray(pts, dtype=float) for tid, pts in envs_by_tid.items() if pts}
+    
+    # Cutting sweeps
+    cut_envs = per_tool_cutting_envelopes(blocks, step=1.0)
+    
+    step = 2.0
+    
+    if mode == "global":
+        included_tools = [p.get_tool(tid) for tid in tools_list if p.get_tool(tid) is not None]
+        if not included_tools:
+            res = {
+                "mode": "global",
+                "x0": 0.0,
+                "z0": 0.0,
+                "dx": 2.0,
+                "dz": 2.0,
+                "nx": 0,
+                "nz": 0,
+                "mask": [],
+                "n_tools": 0
+            }
+        else:
+            ref = p.get_tool(p.reference_tool_id)
+            anchor_tool = ref if (ref is not None and ref.id in [t.id for t in included_tools]) else included_tools[0]
+            cax, caz = p.home_tip(anchor_tool)
+            
+            all_zones = []
+            for tool in included_tools:
+                grid, xs, zs, ax, az = _tool_green_zone(p, tool, envs_np, cut_envs, step, check_tool_overlap=False)
+                all_zones.append((grid, np.asarray(xs), np.asarray(zs), cax, caz))
+                
+            inter, world_xs, world_zs = intersect_green_zones(all_zones, step)
+            res = {
+                "mode": "global",
+                "x0": float(world_xs[0]),
+                "z0": float(world_zs[0]),
+                "dx": float(step),
+                "dz": float(step),
+                "nx": int(len(world_xs)),
+                "nz": int(len(world_zs)),
+                "mask": inter.flatten().tolist(),
+                "n_tools": int(len(all_zones))
+            }
+    elif mode == "per_tool":
+        included_tools = [p.get_tool(tid) for tid in tools_list if p.get_tool(tid) is not None]
+        res_zones = []
+        for tool in included_tools:
+            grid, xs, zs, ax, az = _tool_green_zone(p, tool, envs_np, cut_envs, step, check_tool_overlap=True)
+            res_zones.append({
+                "tool_id": tool.id,
+                "x0": float(ax + xs[0]),
+                "z0": float(az + zs[0]),
+                "dx": float(step),
+                "dz": float(step),
+                "nx": int(len(xs)),
+                "nz": int(len(zs)),
+                "mask": grid.flatten().tolist()
+            })
+        res = {
+            "mode": "per_tool",
+            "zones": res_zones
+        }
+    else:
+        raise HTTPException(status_code=400, detail="Invalid mode. Must be 'global' or 'per_tool'")
+        
+    _zones_cache["key"] = cache_key
+    _zones_cache["result"] = res
+    return res
+
 # Mount static web directory
 app.mount("/", StaticFiles(directory="web", html=True), name="web")
 
